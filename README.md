@@ -34,7 +34,7 @@ while true; do
     videoconvert ! \
     videoscale ! \
     video/x-raw,format=RGB,width=768,height=432 ! \
-    shmsink socket-path=/tmp/shared_memory/video_stream sync=true wait-for-connection=false shm-size=10000000
+    shmsink socket-path=/tmp/shared_memory/video_stream sync=true wait-for-connection=false shm-size=10000000;
 done
 ```
 - Replace `file.mp4` with your video file.
@@ -59,20 +59,60 @@ python3 app.py
 
 ---
 
-### 6. Troubleshooting
+## Running with Docker (Recommended)
+
+### 1. Prepare the Metadata File
+First, create the shared memory directory and metadata file:
+```bash
+mkdir -p /tmp/shared_memory
+python3 write_metadata.py
+```
+
+### 2. Build the Docker Image
+```bash
+docker build -t gradio-shm-app .
+```
+
+### 3. Run with Docker Compose
+```bash
+docker-compose up
+```
+
+This will:
+- Start a GStreamer container that streams your video file to shared memory
+- Start a Gradio app container that displays the stream at http://localhost:7860
+- Both containers use `ipc: host` to share the shared memory segment
+
+### 4. View the Stream
+- Open [http://localhost:7860](http://localhost:7860) in your browser
+- Click **Start Streaming**
+
+### 5. Stop Everything
+```bash
+docker-compose down
+```
+
+---
+
+## Troubleshooting
+
 - **Stripes, black frames, or "replica" images:**
   - Make sure the metadata file and GStreamer pipeline use the same resolution and format.
   - For 768x432, the metadata should be `(432, 768, 1)`.
   - Restart both the pipeline and the app after changes.
-- **No video or "Waiting for frame...":**
+- **No video or "Waiting for frame…":**
   - Ensure the GStreamer pipeline is running and the shared memory file exists.
   - Check logs for errors.
 - **Multiple GStreamer processes:**
   - Only one pipeline should write to the shared memory at a time.
+- **Docker: Can't find shared memory file:**
+  - Make sure both containers have `ipc: host` in the docker-compose file.
+  - The shared memory file is created in `/dev/shm` and must be shared between containers.
 
 ---
 
-### 7. Customizing Resolution
+## Customizing Resolution
+
 - Change both the GStreamer pipeline and the metadata file to match your desired resolution.
 - Example for 1920x1080:
   - GStreamer: `video/x-raw,format=RGB,width=1920,height=1080`
@@ -85,6 +125,7 @@ python3 app.py
 - **GStreamer** writes raw RGB frames to a shared memory segment using `shmsink`.
 - **A metadata file** (`/tmp/shared_memory/video_stream.meta`) stores the frame height, width, and dtype size (always 1 for uint8/RGB).
 - **Python/Gradio** reads the metadata, then reads and displays frames from shared memory.
+- **Reconnection Logic** automatically detects when the shared memory file changes (e.g., when the video restarts) and reconnects.
 
 ---
 
@@ -92,6 +133,7 @@ python3 app.py
 - Python 3.8+
 - GStreamer (with plugins)
 - Python packages: see `requirements.txt`
+- Docker & Docker Compose (for containerized use)
 
 ---
 

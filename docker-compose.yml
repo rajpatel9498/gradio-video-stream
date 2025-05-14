@@ -2,31 +2,28 @@ version: '3.8'
 
 services:
   gstreamer:
-    build: .
-    # Simple pipeline: read video -> convert to RGB -> write to shared memory
+    image: gradio-shm-app
+    container_name: gstreamer-pipeline
+    ipc: host
     command: >
-      bash -c "GST_DEBUG=3 gst-launch-1.0 -v 
-      filesrc location=/app/file.mp4 ! 
-      decodebin ! 
-      videoconvert ! video/x-raw,format=RGB ! 
-      shmsink socket-path=/tmp/shared_memory/video_stream 
-      sync=false wait-for-connection=false"
+      bash -c "while true; do
+        gst-launch-1.0 -v filesrc location=/workspace/file.mp4 ! decodebin ! videoconvert ! videoscale ! video/x-raw,format=RGB,width=768,height=432 ! shmsink socket-path=/tmp/shared_memory/video_stream sync=true wait-for-connection=false shm-size=10000000;
+      done"
     volumes:
       - /tmp/shared_memory:/tmp/shared_memory
-      - ./file.mp4:/app/file.mp4
-    ipc: host
+      - ./file.mp4:/workspace/file.mp4:ro
+    depends_on: []
     restart: unless-stopped
 
-  gradio-app:
-    build: .
+  gradio:
+    image: gradio-shm-app
+    container_name: gradio-app
+    ipc: host
     command: python3 app.py
     ports:
       - "7860:7860"
     volumes:
       - /tmp/shared_memory:/tmp/shared_memory
-    environment:
-      - SOCKET_PATH=/tmp/shared_memory/video_stream
-    ipc: host
     depends_on:
       - gstreamer
     restart: unless-stopped 

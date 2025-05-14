@@ -101,6 +101,8 @@ class SharedMemoryManager:
                 self._mmap = mmap.mmap(fd, 0, mmap.MAP_SHARED, mmap.PROT_READ)
                 os.close(fd)
                 
+                self._current_shm_path = shm_path
+                
                 logger.info(f"Successfully connected to shared memory: {shm_file} ({self.config.width}x{self.config.height})")
                 return
                 
@@ -158,6 +160,9 @@ class SharedMemoryManager:
             logger.error(f"Error reading frame: {e}")
             return None
 
+    def get_current_shm_path(self):
+        return getattr(self, '_current_shm_path', None)
+
 def read_metadata_from_file(meta_path):
     with open(meta_path, 'rb') as f:
         return struct.unpack('III', f.read(12))
@@ -191,13 +196,26 @@ class VideoStreamer:
         
     def _stream_loop(self):
         """Main streaming loop"""
-        with self.shm_manager.connect():
-            while self._running:
-                frame = self.shm_manager.read_frame()
-                if frame is not None:
-                    with self._frame_lock:
-                        self._current_frame = frame
-                time.sleep(1.0 / self.config.fps)  # Maintain frame rate
+        last_shm_path = None
+        while self._running:
+            try:
+                with self.shm_manager.connect():
+                    last_shm_path = self.shm_manager.get_current_shm_path()
+                    while self._running:
+                        frame = self.shm_manager.read_frame()
+                        if frame is not None:
+                            with self._frame_lock:
+                                self._current_frame = frame
+                        # Check if the shared memory file has changed
+                        new_shm_file = self.shm_manager._find_shm_file()
+                        new_shm_path = os.path.join('/dev/shm', new_shm_file) if new_shm_file else None
+                        if new_shm_path and new_shm_path != last_shm_path:
+                            logger.info("Detected new shared memory file, reconnecting...")
+                            break  # Exit inner loop to reconnect
+                        time.sleep(1.0 / self.config.fps)
+            except Exception as e:
+                logger.error(f"Error in streaming loop: {e}")
+                time.sleep(1)
                 
     def get_frame(self) -> Optional[np.ndarray]:
         """Get the current frame"""
