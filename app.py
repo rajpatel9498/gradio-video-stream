@@ -39,7 +39,7 @@ class SharedMemoryManager:
         self._mmap = None
         self._max_retries = 30
         self._retry_delay = 0.5
-        self.frame_size = self.config.height * self.config.width * 3  # RGB
+        self.frame_size = self.config.height * self.config.width * 3
         
     def _find_shm_file(self):
         """Find the actual shared memory file name"""
@@ -136,20 +136,24 @@ class SharedMemoryManager:
         """Read a frame from shared memory"""
         if not self._mmap:
             return None
-            
         try:
             # Skip metadata and read frame data
             frame_data = self._mmap[:self.frame_size]
-            
+            print("Frame buffer length:", len(frame_data))
+            print("Expected:", self.config.height * self.config.width * 3)
+            # Save the first frame for inspection
+            if not hasattr(self, '_frame_saved'):
+                with open("debug_frame.raw", "wb") as f:
+                    f.write(frame_data)
+                print("Saved first raw frame to debug_frame.raw")
+                self._frame_saved = True
             # Convert to numpy array
             frame = np.ndarray(
                 shape=(self.config.height, self.config.width, 3),
                 dtype=np.uint8,
                 buffer=frame_data
             ).copy()  # Make a copy to ensure we own the memory
-            
             return frame
-            
         except Exception as e:
             logger.error(f"Error reading frame: {e}")
             return None
@@ -210,17 +214,33 @@ def create_gradio_interface(config: VideoConfig):
         try:
             streamer.start()
             frame_count = 0
-            
+            yield None, "Starting video processing..."
             while True:
                 frame = streamer.get_frame()
                 if frame is not None:
                     frame_count += 1
-                    if frame_count % 30 == 0:  # Log every 30 frames
-                        logger.info(f"Processed {frame_count} frames")
+                    # Annotate frame with frame number
                     cv2_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                    yield cv2_frame, f"Processing frame {frame_count}"
+                    cv2.putText(
+                        cv2_frame,
+                        f"Frame: {frame_count}",
+                        (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1,
+                        (255, 255, 255),
+                        2
+                    )
+                    # Convert back to RGB for Gradio
+                    frame_rgb = cv2.cvtColor(cv2_frame, cv2.COLOR_BGR2RGB)
+                    # Downscale for display
+                    display_width, display_height = 960, 540
+                    frame_resized = cv2.resize(frame_rgb, (display_width, display_height), interpolation=cv2.INTER_AREA)
+                    if frame_count % 30 == 0:
+                        logger.info(f"Processed {frame_count} frames")
+                    yield frame_resized, f"Processing frame {frame_count}"
+                else:
+                    yield None, f"Waiting for frame..."
                 time.sleep(1.0 / config.fps)
-                
         except Exception as e:
             logger.error(f"Error in video processing: {e}")
             yield None, f"Error: {str(e)}"
