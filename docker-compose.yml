@@ -1,11 +1,29 @@
-version: '3'
+version: '3.8'
 
 services:
-  gradio-app:
-    build: .
+  gstreamer:
+    image: gradio-shm-app
+    container_name: gstreamer-pipeline
+    ipc: host
+    command: >
+      bash -c "while true; do
+        gst-launch-1.0 -v filesrc location=/workspace/file.mp4 ! decodebin ! videoconvert ! videoscale ! video/x-raw,format=RGB,width=768,height=432 ! shmsink socket-path=/tmp/shared_memory/video_stream sync=true wait-for-connection=false shm-size=10000000;
+      done"
+    volumes:
+      - /tmp/shared_memory:/tmp/shared_memory
+      - ./file.mp4:/workspace/file.mp4:ro
+    depends_on: []
+    restart: unless-stopped
+
+  gradio:
+    image: gradio-shm-app
+    container_name: gradio-app
+    ipc: host
+    command: python3 app.py
     ports:
       - "7860:7860"
     volumes:
-      - .:/app
-    environment:
-      - PYTHONUNBUFFERED=1 
+      - /tmp/shared_memory:/tmp/shared_memory
+    depends_on:
+      - gstreamer
+    restart: unless-stopped 
